@@ -41,6 +41,29 @@ import socket
 import re
 
 
+import Adafruit_DHT
+import struct
+
+import ctypes
+
+import hidusbrelay as h
+
+from subprocess import Popen, PIPE
+
+from ctypes import *
+
+#from ctypes import *
+#mylib = CDLL('/usr/local/lib/libhidusb-relay.so')
+#mylib.printf
+#res = mylib.usb_init()
+#print res
+
+#print "should be res above" 
+
+#res1 = mylib.usbhidEnumDevices()
+
+#print res1
+
 ##############################################################################
 #                                                                            #
 #       Kivy UI Imports                                                      #
@@ -192,6 +215,7 @@ MSG_SUBTYPE_BINARY_STATUS			= "binaryStatus"
 MSG_SUBTYPE_TRIPPED					= "armed"
 MSG_SUBTYPE_ARMED					= "tripped"
 MSG_SUBTYPE_TEMPERATURE				= "temperature"
+MSG_SUBTYPE_TEMPERATURE1			= "temperature1"
 MSG_SUBTYPE_FORECAST				= "forecast"
 MSG_SUBTYPE_CUSTOM					= "custom"
 MSG_SUBTYPE_TEXT					= "text"
@@ -450,6 +474,19 @@ try:
 except:
 	tempSensor = None
 
+CB_TYPE = ctypes.CFUNCTYPE(h.UNCHECKED(c_int), h.USBDEVHANDLE, POINTER(None))
+def callback(handle, b):
+	global relayHandle
+
+	relayHandle = handle
+	return 1
+	
+cb_func = CB_TYPE(callback)
+
+vendorId = int("0x16c0", 0)
+deviceId = int("0x05DF", 0)
+result = h.usbhidEnumDevices(vendorId, deviceId, 0, cb_func)
+	
 
 # PIR (Motion Sensor) setup:
 
@@ -489,6 +526,7 @@ if pirEnabled:
 CHILD_DEVICE_HEAT					= "heat"
 CHILD_DEVICE_COOL					= "cool"
 CHILD_DEVICE_FAN					= "fan"
+CHILD_DEVICE_HEAT_RELAY_STATE		= "heatRelayState"
 
 log( LOG_LEVEL_INFO, CHILD_DEVICE_COOL, MSG_SUBTYPE_BINARY_STATUS, str( coolPin ), timestamp=False )
 log( LOG_LEVEL_INFO, CHILD_DEVICE_HEAT, MSG_SUBTYPE_BINARY_STATUS, str( heatPin ), timestamp=False )
@@ -551,8 +589,31 @@ holdControl = ToggleButton( text="[b]Hold[/b]",
 
 setControlState( holdControl, "normal" if not( state.exists( "state" ) ) else state.get( "state" )[ "holdControl" ] )
 
+def heatRead():
 
+	reportnum = c_int(0)
+	len = c_int(9)
+	buffer = h.String("")
+	
+	if 'relayHandle' in globals() and relayHandle is not None:
+		err = h.usbhidGetReport(relayHandle, reportnum, buffer, byref(len))
+		return int(buffer.raw[8:9].encode('hex'), base=16)
+	else:
+		return -1
 
+def heatSet( on ):
+
+	if on :
+		state = 0xFF
+	else:
+		state = 0xFC
+		
+	rep = struct.pack('BBBBBBBBB', 0x00, state, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+	report = h.String(rep)
+	
+	if 'relayHandle' in globals() and relayHandle is not None:	
+		res3 = h.usbhidSetReport(relayHandle, report, 9)
+	
 def get_status_string():
 	with thermostatLock:
 		sched = "None"
@@ -567,7 +628,7 @@ def get_status_string():
 			sched = "Cool"
 	
 		return "[b]System:[/b]\n  " + \
-			   "Heat:     " + ( "[color=00ff00][b]On[/b][/color]" if GPIO.input( heatPin ) else "Off" ) + "\n  " + \
+			   "Heat:     " + ( "[color=00ff00][b]On[/b][/color]" if heatRead() else "Off" ) + "\n  " + \
 		       "Cool:      " + ( "[color=00ff00][b]On[/b][/color]" if GPIO.input( coolPin ) else "Off" ) + "\n  " + \
 		       "Fan:       " + ( "[color=00ff00][b]On[/b][/color]" if GPIO.input( fanPin ) else "Auto" ) + "\n  " + \
 			   "Sched:   " + sched
@@ -805,7 +866,7 @@ def setLogLevel( msg ):
 
 def change_system_settings():
 	with thermostatLock:
-		hpin_start = str( GPIO.input( heatPin ) )
+		hpin_start = str( heatRead() )
 		cpin_start = str( GPIO.input( coolPin ) )
 		fpin_start = str( GPIO.input( fanPin ) )
 
@@ -813,14 +874,14 @@ def change_system_settings():
 			GPIO.output( coolPin, GPIO.LOW )
 
 			if setTemp >= currentTemp + tempHysteresis:
-				GPIO.output( heatPin, GPIO.HIGH )
+				heatSet( 1 ) #GPIO.output( heatPin, GPIO.HIGH )
 				GPIO.output( fanPin, GPIO.HIGH )	
 			elif setTemp <= currentTemp:
-				GPIO.output( heatPin, GPIO.LOW )
+				heatSet( 0 ) #GPIO.output( heatPin, GPIO.LOW )
 				if fanControl.state != "down" and not GPIO.input( coolPin ):
 					GPIO.output( fanPin, GPIO.LOW )			
 		else:
-			GPIO.output( heatPin, GPIO.LOW )
+			heatSet ( 0 ) #GPIO.output( heatPin, GPIO.LOW )
 
 			if coolControl.state == "down":
 				if setTemp <= currentTemp - tempHysteresis:
@@ -828,17 +889,17 @@ def change_system_settings():
 					GPIO.output( fanPin, GPIO.HIGH )
 				elif setTemp >= currentTemp:
 					GPIO.output( coolPin, GPIO.LOW )
-					if fanControl.state != "down" and not GPIO.input( heatPin ):
+					if fanControl.state != "down" and not heatRead():
 						GPIO.output( fanPin, GPIO.LOW )					
 			else:
 				GPIO.output( coolPin, GPIO.LOW )
-				if fanControl.state != "down" and not GPIO.input( heatPin ):
+				if fanControl.state != "down" and not heatRead():
 					GPIO.output( fanPin, GPIO.LOW )
 
 		if fanControl.state == "down":
 			GPIO.output( fanPin, GPIO.HIGH )
 		else:
-			if not GPIO.input( heatPin ) and not GPIO.input( coolPin ):
+			if not heatRead() and not GPIO.input( coolPin ):
 				GPIO.output( fanPin, GPIO.LOW )
 
 		# save the thermostat state in case of restart
@@ -848,8 +909,10 @@ def change_system_settings():
 
 		statusLabel.text = get_status_string()
 
-		if hpin_start != str( GPIO.input( heatPin ) ):
-			log( LOG_LEVEL_STATE, CHILD_DEVICE_HEAT, MSG_SUBTYPE_BINARY_STATUS, "1" if GPIO.input( heatPin ) else "0" )
+		log( LOG_LEVEL_STATE, CHILD_DEVICE_HEAT_RELAY_STATE, MSG_SUBTYPE_BINARY_STATUS, "1" if heatRead() else "0" )
+		
+		if hpin_start != str( heatRead() ):
+			log( LOG_LEVEL_STATE, CHILD_DEVICE_HEAT, MSG_SUBTYPE_BINARY_STATUS, "1" if heatRead() else "0" )
 		if cpin_start != str( GPIO.input( coolPin ) ):
 			log( LOG_LEVEL_STATE, CHILD_DEVICE_COOL, MSG_SUBTYPE_BINARY_STATUS, "1" if GPIO.input( coolPin ) else "0" )
 		if fpin_start != str( GPIO.input( fanPin ) ):
@@ -877,31 +940,36 @@ def control_callback( control ):
 
 def check_sensor_temp( dt ):
 	with thermostatLock:
-		global currentTemp, priorCorrected
+		global currentTemp, priorCorrected, currentHumi
 		global tempSensor
-		
-		if tempSensor is not None:
-			rawTemp = tempSensor.get_temperature( sensorUnits )
+
+#if tempSensor is not None:
+#		rawTemp = tempSensor.get_temperature( sensorUnits )
+		rawHumi, rawTemp = Adafruit_DHT.read_retry(Adafruit_DHT.AM2302, 4)
+
+		if rawHumi is not None and rawHumi < 101 and rawTemp is not None:
 			correctedTemp = ( ( ( rawTemp - freezingMeasured ) * referenceRange ) / measuredRange ) + freezingPoint
 			currentTemp = round( correctedTemp, 1 )
+			currentHumi = round( rawHumi, 1 )
 			log( LOG_LEVEL_DEBUG, CHILD_DEVICE_TEMP, MSG_SUBTYPE_CUSTOM + "/raw", str( rawTemp ) )
 			log( LOG_LEVEL_DEBUG, CHILD_DEVICE_TEMP, MSG_SUBTYPE_CUSTOM + "/corrected", str( correctedTemp ) )
 
 			if abs( priorCorrected - correctedTemp ) >= TEMP_TOLERANCE:
 				log( LOG_LEVEL_STATE, CHILD_DEVICE_TEMP, MSG_SUBTYPE_TEMPERATURE, str( currentTemp ) )	
+				log( LOG_LEVEL_STATE, CHILD_DEVICE_TEMP, MSG_SUBTYPE_TEMPERATURE1, str( currentTemp ) )	
 				priorCorrected = correctedTemp	
 
-		currentLabel.text = "[b]" + str( currentTemp ) + scaleUnits + "[/b]"
-		altCurLabel.text  = currentLabel.text
+			currentLabel.text = "[b]" + str( currentTemp ) + scaleUnits + "[/b]"
+			altCurLabel.text  = currentLabel.text
 
-		dateLabel.text      = "[b]" + time.strftime("%a %b %d, %Y") + "[/b]"
+			dateLabel.text      = "[b]" + time.strftime("%a %b %d, %Y") + "[/b]"
 
-		timeStr		 = time.strftime("%I:%M %p").lower()
+			timeStr		 = time.strftime("%I:%M %p").lower()
 
-		timeLabel.text      = ( "[b]" + ( timeStr if timeStr[0:1] != "0" else timeStr[1:] ) + "[/b]" ).lower()
-		altTimeLabel.text  	= timeLabel.text
+			timeLabel.text      = ( "[b]" + ( timeStr if timeStr[0:1] != "0" else timeStr[1:] ) + "[/b]" ).lower()
+			altTimeLabel.text  	= timeLabel.text
 
-		change_system_settings()
+			change_system_settings()
 
 
 # This is called when the desired temp slider is updated:
@@ -1188,7 +1256,7 @@ def reloadSchedule():
 				if useTestSchedule: 
 					activeSched = getTestSchedule()
 					log( LOG_LEVEL_INFO, CHILD_DEVICE_SCHEDULER, MSG_SUBTYPE_CUSTOM + "/load", "test" )
-					print "Using Test Schedule!!!"
+					#print "Using Test Schedule!!!";
 	
 		if activeSched != None:
 			for day, entries in activeSched.iteritems():
@@ -1219,6 +1287,7 @@ class WebInterface( object ):
 			html = html.replace( "@@version@@", str( THERMOSTAT_VERSION ) )
 			html = html.replace( "@@temp@@", str( setTemp ) )
 			html = html.replace( "@@current@@", str( currentTemp ) + scaleUnits )
+			html = html.replace( "@@currentHumi@@", str( currentHumi ) + "%" )
 			html = html.replace( "@@minTemp@@", str( minTemp ) )
 			html = html.replace( "@@maxTemp@@", str( maxTemp ) )
 			html = html.replace( "@@tempStep@@", str( tempStep ) )
@@ -1343,6 +1412,38 @@ class WebInterface( object ):
 		
 		return html
 
+	@cherrypy.expose
+	def temp_png(self, time=None):
+		rrdfile = os.path.join("/var/run/mqtt2rrd/mymqtt/sensor/log/state/thermostat/temperatureSensor/set/", "temperature.rrd")
+		cherrypy.response.headers['Content-Type'] = 'image/png'
+		command = ('rrdtool', 'graph', '-', "--imgformat", "PNG", "DEF:mymqtt_sensor_log_s="+rrdfile+":mymqtt_sensor_log_s:AVERAGE", "LINE:mymqtt_sensor_log_s#FF0000:Temperature (Celsius)")
+		if time is not None:
+			command += ('--start', 'end-'+time)
+
+		return Popen(command, stdout=PIPE).communicate()[0]		
+
+	@cherrypy.expose
+	def temp1_png(self, time=None):
+		rrdfile = os.path.join("/var/run/mqtt2rrd/mymqtt/sensor/log/state/thermostat/temperatureSensor/set/", "temperature1.rrd")
+		cherrypy.response.headers['Content-Type'] = 'image/png'
+		command = ('rrdtool', 'graph', '-', "--imgformat", "PNG", "DEF:mymqtt_sensor_log_s="+rrdfile+":mymqtt_sensor_log_s:AVERAGE", "LINE:mymqtt_sensor_log_s#FF0000:Temperature (Celsius)")
+		if time is not None:
+			command += ('--start', 'end-'+time)
+
+		return Popen(command, stdout=PIPE).communicate()[0]		
+
+	@cherrypy.expose
+	def test(self, time=None):
+		rrdfile = os.path.join("/var/run/mqtt2rrd/mymqtt/sensor/log/state/thermostat/temperatureSensor/set/", "temperature1.rrd")
+		rrdfile1 = os.path.join("/var/run/mqtt2rrd/mymqtt/sensor/log/state/thermostat/heatRelayState/set", "binaryStatus.rrd")
+		cherrypy.response.headers['Content-Type'] = 'image/png'
+		command = ('rrdtool', 'graph', '-', "--imgformat", "PNG", "DEF:temp="+rrdfile+":mymqtt_sensor_log_s:AVERAGE", "DEF:on="+rrdfile1+":mymqtt_sensor_log_s:MAX", "CDEF:ok=on,temp,0,IF","AREA:ok#00FF00:OK", "LINE:temp#FF0000:Temperature (Celsius)")
+		if time is not None:
+			command += ('--start', 'end-'+time)
+
+		return Popen(command, stdout=PIPE).communicate()[0]		
+			
+
 
 def startWebServer():	
 	host = "discover" if not( settings.exists( "web" ) ) else settings.get( "web" )[ "host" ]
@@ -1401,7 +1502,7 @@ def main():
 	webThread.daemon = True
 	webThread.start()
 
-	# Start Scheduler
+	# Start Scheduler 
 	reloadSchedule()
 	schedThread = threading.Thread( target=startScheduler )
 	schedThread.daemon = True

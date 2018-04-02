@@ -1,4 +1,4 @@
 #!/bin/sh
-cd /home/pi/thermostat
-python thermostat.py&
+cd /opt/thermostat
+KIVY_BCM_DISPMANX_ID=2 python thermostat.py
 
