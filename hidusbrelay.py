@@ -1,7 +1,7 @@
 '''Wrapper for hiddata.h
 
 Generated with:
-ctypesgen/ctypesgen.py -I /usr/include -L /usr/local/lib -l libhidusb-relay.so /opt/openwrt-artbern/pavelusb/src/hiddata.h -o hidusbrelay.py
+ctypesgen/ctypesgen.py -I /usr/include -L /usr/local/lib -l libhidusb-relay.so /opt/usb-relay-hid/commandline/hiddata.h -o hidusbrelay.py
 
 Do not modify this file.
 '''
@@ -53,8 +53,8 @@ class UserString:
         elif isinstance(seq, UserString):
             self.data = seq.data[:]
         else:
-            self.data = str(seq)
-    def __str__(self): return str(self.data)
+            self.data = bytes(seq)
+    def __str__(self): return bytes(self.data)
     def __repr__(self): return repr(self.data)
     def __int__(self): return int(self.data)
     def __long__(self): return long(self.data)
@@ -82,12 +82,12 @@ class UserString:
         elif isinstance(other, basestring):
             return self.__class__(self.data + other)
         else:
-            return self.__class__(self.data + str(other))
+            return self.__class__(self.data + bytes(other))
     def __radd__(self, other):
         if isinstance(other, basestring):
             return self.__class__(other + self.data)
         else:
-            return self.__class__(str(other) + self.data)
+            return self.__class__(bytes(other) + self.data)
     def __mul__(self, n):
         return self.__class__(self.data*n)
     __rmul__ = __mul__
@@ -98,7 +98,7 @@ class UserString:
     def capitalize(self): return self.__class__(self.data.capitalize())
     def center(self, width, *args):
         return self.__class__(self.data.center(width, *args))
-    def count(self, sub, start=0, end=sys.maxint):
+    def count(self, sub, start=0, end=sys.maxsize):
         return self.data.count(sub, start, end)
     def decode(self, encoding=None, errors=None): # XXX improve this?
         if encoding:
@@ -116,13 +116,13 @@ class UserString:
                 return self.__class__(self.data.encode(encoding))
         else:
             return self.__class__(self.data.encode())
-    def endswith(self, suffix, start=0, end=sys.maxint):
+    def endswith(self, suffix, start=0, end=sys.maxsize):
         return self.data.endswith(suffix, start, end)
     def expandtabs(self, tabsize=8):
         return self.__class__(self.data.expandtabs(tabsize))
-    def find(self, sub, start=0, end=sys.maxint):
+    def find(self, sub, start=0, end=sys.maxsize):
         return self.data.find(sub, start, end)
-    def index(self, sub, start=0, end=sys.maxint):
+    def index(self, sub, start=0, end=sys.maxsize):
         return self.data.index(sub, start, end)
     def isalpha(self): return self.data.isalpha()
     def isalnum(self): return self.data.isalnum()
@@ -142,9 +142,9 @@ class UserString:
         return self.data.partition(sep)
     def replace(self, old, new, maxsplit=-1):
         return self.__class__(self.data.replace(old, new, maxsplit))
-    def rfind(self, sub, start=0, end=sys.maxint):
+    def rfind(self, sub, start=0, end=sys.maxsize):
         return self.data.rfind(sub, start, end)
-    def rindex(self, sub, start=0, end=sys.maxint):
+    def rindex(self, sub, start=0, end=sys.maxsize):
         return self.data.rindex(sub, start, end)
     def rjust(self, width, *args):
         return self.__class__(self.data.rjust(width, *args))
@@ -156,7 +156,7 @@ class UserString:
     def rsplit(self, sep=None, maxsplit=-1):
         return self.data.rsplit(sep, maxsplit)
     def splitlines(self, keepends=0): return self.data.splitlines(keepends)
-    def startswith(self, prefix, start=0, end=sys.maxint):
+    def startswith(self, prefix, start=0, end=sys.maxsize):
         return self.data.startswith(prefix, start, end)
     def strip(self, chars=None): return self.__class__(self.data.strip(chars))
     def swapcase(self): return self.__class__(self.data.swapcase())
@@ -202,7 +202,7 @@ class MutableString(UserString):
         elif isinstance(sub, basestring):
             self.data = self.data[:start]+sub+self.data[end:]
         else:
-            self.data =  self.data[:start]+str(sub)+self.data[end:]
+            self.data =  self.data[:start]+bytes(sub)+self.data[end:]
     def __delslice__(self, start, end):
         start = max(start, 0); end = max(end, 0)
         self.data = self.data[:start] + self.data[end:]
@@ -214,7 +214,7 @@ class MutableString(UserString):
         elif isinstance(other, basestring):
             self.data += other
         else:
-            self.data += str(other)
+            self.data += bytes(other)
         return self
     def __imul__(self, n):
         self.data *= n
@@ -226,8 +226,10 @@ class String(MutableString, Union):
                 ('data', c_char_p)]
 
     def __init__(self, obj=""):
-        if isinstance(obj, (str, unicode, UserString)):
-            self.data = str(obj)
+        if isinstance(obj, (str, UserString)):
+            self.data = bytes(obj, "utf-8")
+        elif isinstance(obj, bytes):
+            self.data = obj
         else:
             self.raw = obj
 
@@ -243,8 +245,8 @@ class String(MutableString, Union):
         elif isinstance(obj, String):
             return obj
 
-        # Convert from str
-        elif isinstance(obj, str):
+        # Convert from bytes
+        elif isinstance(obj, bytes):
             return cls(obj)
 
         # Convert from c_char_p
@@ -275,7 +277,7 @@ def ReturnString(obj, func=None, arguments=None):
 # Non-primitive return values wrapped with UNCHECKED won't be
 # typechecked, and will be converted to c_void_p.
 def UNCHECKED(type):
-    if (hasattr(type, "_type_") and isinstance(type._type_, str)
+    if (hasattr(type, "_type_") and isinstance(type._type_, bytes)
         and type._type_ != "P"):
         return type
     else:
@@ -377,7 +379,7 @@ class LibraryLoader(object):
                 return ctypes.CDLL(path, ctypes.RTLD_GLOBAL)
             else:
                 return ctypes.cdll.LoadLibrary(path)
-        except OSError,e:
+        except OSError as e:
             raise ImportError(e)
 
     def getpaths(self,libname):
@@ -611,111 +613,111 @@ _libs["libhidusb-relay.so"] = load_library("libhidusb-relay.so")
 
 # No modules
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 41
+# /opt/usb-relay-hid/commandline/hiddata.h: 41
 class struct_usbDevice(Structure):
     pass
 
-usbDevice_t = struct_usbDevice # /opt/openwrt-artbern/pavelusb/src/hiddata.h: 42
+usbDevice_t = struct_usbDevice # /opt/usb-relay-hid/commandline/hiddata.h: 42
 
-USBDEVHANDLE = POINTER(usbDevice_t) # /opt/openwrt-artbern/pavelusb/src/hiddata.h: 43
+USBDEVHANDLE = POINTER(usbDevice_t) # /opt/usb-relay-hid/commandline/hiddata.h: 43
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 57
+# /opt/usb-relay-hid/commandline/hiddata.h: 57
 if hasattr(_libs['libhidusb-relay.so'], 'usbhidEnumDevices'):
     usbhidEnumDevices = _libs['libhidusb-relay.so'].usbhidEnumDevices
     usbhidEnumDevices.argtypes = [c_int, c_int, POINTER(None), CFUNCTYPE(UNCHECKED(c_int), USBDEVHANDLE, POINTER(None))]
     usbhidEnumDevices.restype = c_int
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 63
+# /opt/usb-relay-hid/commandline/hiddata.h: 63
 if hasattr(_libs['libhidusb-relay.so'], 'usbhidCloseDevice'):
     usbhidCloseDevice = _libs['libhidusb-relay.so'].usbhidCloseDevice
     usbhidCloseDevice.argtypes = [USBDEVHANDLE]
     usbhidCloseDevice.restype = None
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 70
+# /opt/usb-relay-hid/commandline/hiddata.h: 70
 if hasattr(_libs['libhidusb-relay.so'], 'usbhidGetVendorString'):
     usbhidGetVendorString = _libs['libhidusb-relay.so'].usbhidGetVendorString
     usbhidGetVendorString.argtypes = [USBDEVHANDLE, String, c_int]
     usbhidGetVendorString.restype = c_int
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 71
+# /opt/usb-relay-hid/commandline/hiddata.h: 71
 if hasattr(_libs['libhidusb-relay.so'], 'usbhidGetProductString'):
     usbhidGetProductString = _libs['libhidusb-relay.so'].usbhidGetProductString
     usbhidGetProductString.argtypes = [USBDEVHANDLE, String, c_int]
     usbhidGetProductString.restype = c_int
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 79
+# /opt/usb-relay-hid/commandline/hiddata.h: 79
 if hasattr(_libs['libhidusb-relay.so'], 'usbhidSetReport'):
     usbhidSetReport = _libs['libhidusb-relay.so'].usbhidSetReport
     usbhidSetReport.argtypes = [USBDEVHANDLE, String, c_int]
     usbhidSetReport.restype = c_int
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 91
+# /opt/usb-relay-hid/commandline/hiddata.h: 91
 if hasattr(_libs['libhidusb-relay.so'], 'usbhidGetReport'):
     usbhidGetReport = _libs['libhidusb-relay.so'].usbhidGetReport
     usbhidGetReport.argtypes = [USBDEVHANDLE, c_int, String, POINTER(c_int)]
     usbhidGetReport.restype = c_int
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 98
+# /opt/usb-relay-hid/commandline/hiddata.h: 98
 if hasattr(_libs['libhidusb-relay.so'], 'usbhidStrerror_r'):
     usbhidStrerror_r = _libs['libhidusb-relay.so'].usbhidStrerror_r
     usbhidStrerror_r.argtypes = [c_int, String, c_int]
     usbhidStrerror_r.restype = c_int
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 26
+# /opt/usb-relay-hid/commandline/hiddata.h: 26
 try:
     USBHID_OK = 0
 except:
     pass
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 27
+# /opt/usb-relay-hid/commandline/hiddata.h: 27
 try:
     USBHID_ERR_ACCESS = 1
 except:
     pass
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 28
+# /opt/usb-relay-hid/commandline/hiddata.h: 28
 try:
     USBHID_ERR_IO = 2
 except:
     pass
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 29
+# /opt/usb-relay-hid/commandline/hiddata.h: 29
 try:
     USBHID_ERR_NOTFOUND = 3
 except:
     pass
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 30
+# /opt/usb-relay-hid/commandline/hiddata.h: 30
 try:
     USBHID_ERR_BAD_ARG = 20
 except:
     pass
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 31
+# /opt/usb-relay-hid/commandline/hiddata.h: 31
 try:
     USBHID_ERR_INTERNAL = 23
 except:
     pass
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 32
+# /opt/usb-relay-hid/commandline/hiddata.h: 32
 try:
     USBHID_ERR_IO_USB = 24
 except:
     pass
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 33
+# /opt/usb-relay-hid/commandline/hiddata.h: 33
 try:
     USBHID_ERR_IO_HID = 25
 except:
     pass
 
-# /opt/openwrt-artbern/pavelusb/src/hiddata.h: 34
+# /opt/usb-relay-hid/commandline/hiddata.h: 34
 try:
     USBHID_ERR_UNKNOWN = (-1)
 except:
     pass
 
-usbDevice = struct_usbDevice # /opt/openwrt-artbern/pavelusb/src/hiddata.h: 41
+usbDevice = struct_usbDevice # /opt/usb-relay-hid/commandline/hiddata.h: 41
 
 # No inserted files
 

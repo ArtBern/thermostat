@@ -34,35 +34,18 @@ import math
 import os, os.path, sys
 import time
 import datetime
-import urllib2
+from urllib.request import urlopen
 import json
 import random
 import socket
 import re
 
 
-import Adafruit_DHT
 import struct
 
 import ctypes
 
-import hidusbrelay as h
-
 from subprocess import Popen, PIPE
-
-from ctypes import *
-
-#from ctypes import *
-#mylib = CDLL('/usr/local/lib/libhidusb-relay.so')
-#mylib.printf
-#res = mylib.usb_init()
-#print res
-
-#print "should be res above" 
-
-#res1 = mylib.usbhidEnumDevices()
-
-#print res1
 
 ##############################################################################
 #                                                                            #
@@ -70,8 +53,11 @@ from ctypes import *
 #                                                                            #
 ##############################################################################
 
+os.environ['KIVY_GL_BACKEND'] = 'gl'
+os.environ['KIVY_NO_FILELOG'] = '1'
+
 import kivy
-kivy.require( '1.9.0' ) # replace with your current kivy version !
+kivy.require( '1.11.0' ) # replace with your current kivy version !
 
 from kivy.app import App
 from kivy.uix.button import Button
@@ -108,14 +94,6 @@ except ImportError:
 	import FakeRPi.GPIO as GPIO
 
 
-##############################################################################
-#                                                                            #
-#       Sensor Imports                                                       #
-#                                                                            #
-##############################################################################
-
-from w1thermsensor import W1ThermSensor
-
 
 ##############################################################################
 #                                                                            #
@@ -130,6 +108,14 @@ try:
 except ImportError:
 	mqttAvailable = False
 
+from thermostat_reader import BaseReader
+from thermostat_reader_w1 import W1Reader
+from thermostat_reader_adafruit import AdafruitDhtReader
+
+from thermostat_relay_reader_gpio import GPIORelayReader
+from thermostat_relay_reader_hidusb import HIDUSBRelayReader
+from thermostat_relay_setter_gpio import GPIORelaySetter
+from thermostat_relay_setter_hidusb import HIDUSBRelaySetter
 
 ##############################################################################
 #                                                                            #
@@ -406,7 +392,6 @@ scaleUnits 	  	  = "c" if tempScale == "metric" else "f"
 precipUnits	      = " mm" if tempScale == "metric" else '"'
 precipFactor	  = 1.0 if tempScale == "metric" else 0.0393701
 precipRound 	  = 0 if tempScale == "metric" else 1
-sensorUnits		  = W1ThermSensor.DEGREES_C if tempScale == "metric" else W1ThermSensor.DEGREES_F
 windFactor		  = 3.6 if tempScale == "metric" else 1.0
 windUnits		  = " km/h" if tempScale == "metric" else " mph"
 
@@ -428,7 +413,6 @@ log( LOG_LEVEL_INFO, CHILD_DEVICE_NODE, MSG_SUBTYPE_CUSTOM + "/settings/temperat
 log( LOG_LEVEL_INFO, CHILD_DEVICE_NODE, MSG_SUBTYPE_CUSTOM + "/settings/temperature/scaleUnits", str( scaleUnits ), timestamp=False )
 log( LOG_LEVEL_INFO, CHILD_DEVICE_NODE, MSG_SUBTYPE_CUSTOM + "/settings/temperature/precipUnits", str( precipUnits ), timestamp=False )
 log( LOG_LEVEL_INFO, CHILD_DEVICE_NODE, MSG_SUBTYPE_CUSTOM + "/settings/temperature/precipFactor", str( precipFactor ), timestamp=False )
-log( LOG_LEVEL_INFO, CHILD_DEVICE_NODE, MSG_SUBTYPE_CUSTOM + "/settings/temperature/sensorUnits", str( sensorUnits ), timestamp=False )
 log( LOG_LEVEL_INFO, CHILD_DEVICE_NODE, MSG_SUBTYPE_CUSTOM + "/settings/temperature/windFactor", str( windFactor ), timestamp=False )
 log( LOG_LEVEL_INFO, CHILD_DEVICE_NODE, MSG_SUBTYPE_CUSTOM + "/settings/temperature/windUnits", str( windUnits ), timestamp=False )
 log( LOG_LEVEL_INFO, CHILD_DEVICE_NODE, MSG_SUBTYPE_CUSTOM + "/settings/temperature/currentTemp", str( currentTemp ), timestamp=False )
@@ -470,23 +454,16 @@ log( LOG_LEVEL_INFO, CHILD_DEVICE_NODE, MSG_SUBTYPE_CUSTOM + "/settings/UISlider
 log( LOG_LEVEL_INFO, CHILD_DEVICE_NODE, MSG_SUBTYPE_CUSTOM + "/settings/UISlider/tempStep", str( tempStep ), timestamp=False )
 
 try:
-	tempSensor = W1ThermSensor()
+	#tempSensor = W1ThermSensor()
+	tempSensor = W1Reader()
 except:
 	tempSensor = None
 
-CB_TYPE = ctypes.CFUNCTYPE(h.UNCHECKED(c_int), h.USBDEVHANDLE, POINTER(None))
-def callback(handle, b):
-	global relayHandle
+heatRelayReader = GPIORelayReader(settings)
+#heatRelayReader = HIDUSBRelayReader(settings)
+heatRelaySetter = GPIORelaySetter(settings)
+#heatRelaySetter = HIDUSBRelaySetter(settings)
 
-	relayHandle = handle
-	return 1
-	
-cb_func = CB_TYPE(callback)
-
-vendorId = int("0x16c0", 0)
-deviceId = int("0x05DF", 0)
-result = h.usbhidEnumDevices(vendorId, deviceId, 0, cb_func)
-	
 
 # PIR (Motion Sensor) setup:
 
@@ -515,8 +492,8 @@ fanPin  			= 25 if not( settings.exists( "thermostat" ) ) else settings.get( "th
 GPIO.setmode( GPIO.BCM )
 GPIO.setup( coolPin, GPIO.OUT )
 GPIO.output( coolPin, GPIO.LOW )
-GPIO.setup( heatPin, GPIO.OUT )
-GPIO.output( heatPin, GPIO.LOW )
+#GPIO.setup( heatPin, GPIO.OUT )
+#GPIO.output( heatPin, GPIO.LOW )
 GPIO.setup( fanPin, GPIO.OUT )
 GPIO.output( fanPin, GPIO.LOW )
 
@@ -590,29 +567,14 @@ holdControl = ToggleButton( text="[b]Hold[/b]",
 setControlState( holdControl, "normal" if not( state.exists( "state" ) ) else state.get( "state" )[ "holdControl" ] )
 
 def heatRead():
-
-	reportnum = c_int(0)
-	len = c_int(9)
-	buffer = h.String("")
 	
-	if 'relayHandle' in globals() and relayHandle is not None:
-		err = h.usbhidGetReport(relayHandle, reportnum, buffer, byref(len))
-		return int(buffer.raw[8:9].encode('hex'), base=16)
-	else:
-		return -1
+	return heatRelayReader.read()
 
+		
 def heatSet( on ):
 
-	if on :
-		state = 0xFF
-	else:
-		state = 0xFC
-		
-	rep = struct.pack('BBBBBBBBB', 0x00, state, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
-	report = h.String(rep)
-	
-	if 'relayHandle' in globals() and relayHandle is not None:	
-		res3 = h.usbhidSetReport(relayHandle, report, 9)
+	heatRelaySetter.set( on )
+
 	
 def get_status_string():
 	with thermostatLock:
@@ -683,7 +645,7 @@ forecastTomoImg    		  = Image( source="web/images/na.png", size_hint = ( None, 
 
 
 def get_weather( url ):
-	return json.loads( urllib2.urlopen( url, None, weatherURLTimeout ).read() )
+	return json.loads( urlopen( url, None, weatherURLTimeout ))
 
 
 def get_cardinal_direction( heading ):
@@ -943,33 +905,35 @@ def check_sensor_temp( dt ):
 		global currentTemp, priorCorrected, currentHumi
 		global tempSensor
 
-#if tempSensor is not None:
-#		rawTemp = tempSensor.get_temperature( sensorUnits )
-		rawHumi, rawTemp = Adafruit_DHT.read_retry(Adafruit_DHT.AM2302, 4)
+	if tempSensor is not None:
+		
+		dataDict = tempSensor.read()
+		rawTemp = dataDict['temp']
+		rawHumi = dataDict['humi']
 
-		if rawHumi is not None and rawHumi < 101 and rawTemp is not None:
-			correctedTemp = ( ( ( rawTemp - freezingMeasured ) * referenceRange ) / measuredRange ) + freezingPoint
-			currentTemp = round( correctedTemp, 1 )
-			currentHumi = round( rawHumi, 1 )
-			log( LOG_LEVEL_DEBUG, CHILD_DEVICE_TEMP, MSG_SUBTYPE_CUSTOM + "/raw", str( rawTemp ) )
-			log( LOG_LEVEL_DEBUG, CHILD_DEVICE_TEMP, MSG_SUBTYPE_CUSTOM + "/corrected", str( correctedTemp ) )
 
-			if abs( priorCorrected - correctedTemp ) >= TEMP_TOLERANCE:
-				log( LOG_LEVEL_STATE, CHILD_DEVICE_TEMP, MSG_SUBTYPE_TEMPERATURE, str( currentTemp ) )	
-				log( LOG_LEVEL_STATE, CHILD_DEVICE_TEMP, MSG_SUBTYPE_TEMPERATURE1, str( currentTemp ) )	
-				priorCorrected = correctedTemp	
+		correctedTemp = ( ( ( rawTemp - freezingMeasured ) * referenceRange ) / measuredRange ) + freezingPoint
+		currentTemp = round( correctedTemp, 1 )
+		currentHumi = round( rawHumi, 1 )
+		log( LOG_LEVEL_DEBUG, CHILD_DEVICE_TEMP, MSG_SUBTYPE_CUSTOM + "/raw", str( rawTemp ) )
+		log( LOG_LEVEL_DEBUG, CHILD_DEVICE_TEMP, MSG_SUBTYPE_CUSTOM + "/corrected", str( correctedTemp ) )
 
-			currentLabel.text = "[b]" + str( currentTemp ) + scaleUnits + "[/b]"
-			altCurLabel.text  = currentLabel.text
+		if abs( priorCorrected - correctedTemp ) >= TEMP_TOLERANCE:
+			log( LOG_LEVEL_STATE, CHILD_DEVICE_TEMP, MSG_SUBTYPE_TEMPERATURE, str( currentTemp ) )	
+			log( LOG_LEVEL_STATE, CHILD_DEVICE_TEMP, MSG_SUBTYPE_TEMPERATURE1, str( currentTemp ) )	
+			priorCorrected = correctedTemp	
 
-			dateLabel.text      = "[b]" + time.strftime("%a %b %d, %Y") + "[/b]"
+		currentLabel.text = "[b]" + str( currentTemp ) + scaleUnits + "[/b]"
+		altCurLabel.text  = currentLabel.text
 
-			timeStr		 = time.strftime("%I:%M %p").lower()
+		dateLabel.text      = "[b]" + time.strftime("%a %b %d, %Y") + "[/b]"
 
-			timeLabel.text      = ( "[b]" + ( timeStr if timeStr[0:1] != "0" else timeStr[1:] ) + "[/b]" ).lower()
-			altTimeLabel.text  	= timeLabel.text
+		timeStr		 = time.strftime("%I:%M %p").lower()
 
-			change_system_settings()
+		timeLabel.text      = ( "[b]" + ( timeStr if timeStr[0:1] != "0" else timeStr[1:] ) + "[/b]" ).lower()
+		altTimeLabel.text  	= timeLabel.text
+
+		change_system_settings()
 
 
 # This is called when the desired temp slider is updated:
@@ -1208,6 +1172,7 @@ def startScheduler():
 		time.sleep( 10 )
 
 
+
 def setScheduledTemp( temp ):
 	with thermostatLock:
 		global setTemp
@@ -1259,7 +1224,7 @@ def reloadSchedule():
 					#print "Using Test Schedule!!!";
 	
 		if activeSched != None:
-			for day, entries in activeSched.iteritems():
+			for day, entries in activeSched.items():
 				for i, entry in enumerate( entries ):
 					getattr( schedule.every(), day ).at( entry[ 0 ] ).do( setScheduledTemp, entry[ 1 ] )
 					log( LOG_LEVEL_DEBUG, CHILD_DEVICE_SCHEDULER, MSG_SUBTYPE_TEXT, "Set " + day + ", at: " + entry[ 0 ] + " = " + str( entry[ 1 ] ) + scaleUnits )

@@ -5,12 +5,12 @@
         "freezingMeasured": 0.01
     },
     "logging": {
-        "channel": "mqtt",
+        "channel": "print",
         "level": "info"
     },
     "mqtt": {
         "clientID": "thermostat",
-        "enabled": 1,
+        "enabled": 0,
         "port": 1883,
         "pubPrefix": "mymqtt",
         "server": "localhost"
@@ -26,23 +26,24 @@
         "tempScale": "metric"    
     },
     "thermostat": {
-        "coolPin": 18,
+        "coolPin": 13,
         "fanPin": 25,
-        "heatPin": 23,
+        "heatPin": 18,
         "maxTemp": 30.0,
         "minTemp": -5.0,
         "minUIEnabled": 1,
         "minUITimeout": 60,
         "tempCheckInterval": 3,
         "tempHysteresis": 1.5,
-        "tempStep": 0.5
+        "tempStep": 0.5,
+		"usbRelayNum": 0
     },
     "weather": {
         "appkey": "6aa9e0b0a408a824e38ee03828587a82",
         "forecastRefreshInterval": 60,
         "location": "Moscow,RU",
-        "weatherExceptionInterval": 5,
-        "weatherRefreshInterval": 10,
+        "weatherExceptionInterval": 500,
+        "weatherRefreshInterval": 1000,
 		"URLtimeout": 5
     },
     "web": {

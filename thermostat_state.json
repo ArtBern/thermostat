@@ -1,1 +1,1 @@
-{"state": {"fanControl": "normal", "holdControl": "normal", "setTemp": 5.0, "heatControl": "down", "coolControl": "normal"}}
+{"state": {"coolControl": "normal", "setTemp": 20.0, "holdControl": "normal", "fanControl": "normal", "heatControl": "down"}}
