@@ -54,7 +54,7 @@ class UserString:
             self.data = seq.data[:]
         else:
             self.data = bytes(seq)
-    def __str__(self): return bytes(self.data)
+    def __str__(self): return str(self.data)
     def __repr__(self): return repr(self.data)
     def __int__(self): return int(self.data)
     def __long__(self): return long(self.data)

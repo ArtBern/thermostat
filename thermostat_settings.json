@@ -5,12 +5,12 @@
         "freezingMeasured": 0.01
     },
     "logging": {
-        "channel": "print",
+        "channel": "mqtt",
         "level": "info"
     },
     "mqtt": {
         "clientID": "thermostat",
-        "enabled": 0,
+        "enabled": 1,
         "port": 1883,
         "pubPrefix": "mymqtt",
         "server": "localhost"
@@ -36,7 +36,8 @@
         "tempCheckInterval": 3,
         "tempHysteresis": 1.5,
         "tempStep": 0.5,
-		"usbRelayNum": 0
+		"usbRelayNum": 0,
+		"usbRelayId": "ABCDE"
     },
     "weather": {
         "appkey": "6aa9e0b0a408a824e38ee03828587a82",

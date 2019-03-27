@@ -105,7 +105,8 @@ try:
 	import paho.mqtt.client as mqtt
 	import paho.mqtt.publish as publish
 	mqttAvailable = True
-except ImportError:
+except ImportError as ie:
+	log( LOG_LEVEL_ERROR, CHILD_DEVICE_MQTT, MSG_SUBTYPE_TEXT, "Error importing MQTT: {0}:{1}".format(e.__class__.__name__, e.message))
 	mqttAvailable = False
 
 from thermostat_reader import BaseReader
@@ -459,10 +460,10 @@ try:
 except:
 	tempSensor = None
 
-heatRelayReader = GPIORelayReader(settings)
-#heatRelayReader = HIDUSBRelayReader(settings)
-heatRelaySetter = GPIORelaySetter(settings)
-#heatRelaySetter = HIDUSBRelaySetter(settings)
+#heatRelayReader = GPIORelayReader(settings)
+heatRelayReader = HIDUSBRelayReader(settings)
+#heatRelaySetter = GPIORelaySetter(settings)
+heatRelaySetter = HIDUSBRelaySetter(settings)
 
 
 # PIR (Motion Sensor) setup:
@@ -918,10 +919,10 @@ def check_sensor_temp( dt ):
 		log( LOG_LEVEL_DEBUG, CHILD_DEVICE_TEMP, MSG_SUBTYPE_CUSTOM + "/raw", str( rawTemp ) )
 		log( LOG_LEVEL_DEBUG, CHILD_DEVICE_TEMP, MSG_SUBTYPE_CUSTOM + "/corrected", str( correctedTemp ) )
 
-		if abs( priorCorrected - correctedTemp ) >= TEMP_TOLERANCE:
-			log( LOG_LEVEL_STATE, CHILD_DEVICE_TEMP, MSG_SUBTYPE_TEMPERATURE, str( currentTemp ) )	
-			log( LOG_LEVEL_STATE, CHILD_DEVICE_TEMP, MSG_SUBTYPE_TEMPERATURE1, str( currentTemp ) )	
-			priorCorrected = correctedTemp	
+#		if abs( priorCorrected - correctedTemp ) >= TEMP_TOLERANCE:
+		log( LOG_LEVEL_STATE, CHILD_DEVICE_TEMP, MSG_SUBTYPE_TEMPERATURE, str( currentTemp ) )	
+		log( LOG_LEVEL_STATE, CHILD_DEVICE_TEMP, MSG_SUBTYPE_TEMPERATURE1, str( currentTemp ) )	
+#			priorCorrected = correctedTemp	
 
 		currentLabel.text = "[b]" + str( currentTemp ) + scaleUnits + "[/b]"
 		altCurLabel.text  = currentLabel.text
