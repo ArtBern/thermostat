@@ -112,6 +112,7 @@ except ImportError as ie:
 from thermostat_reader import BaseReader
 from thermostat_reader_w1 import W1Reader
 from thermostat_reader_adafruit import AdafruitDhtReader
+from thermostat_reader_adafruit_ccs811 import AdafruitCCS811Reader
 
 from thermostat_relay_reader_gpio import GPIORelayReader
 from thermostat_relay_reader_hidusb import HIDUSBRelayReader
@@ -203,6 +204,7 @@ MSG_SUBTYPE_TRIPPED					= "armed"
 MSG_SUBTYPE_ARMED					= "tripped"
 MSG_SUBTYPE_TEMPERATURE				= "temperature"
 MSG_SUBTYPE_TEMPERATURE1			= "temperature1"
+MSG_SUBTYPE_CO2						= "co2"
 MSG_SUBTYPE_FORECAST				= "forecast"
 MSG_SUBTYPE_CUSTOM					= "custom"
 MSG_SUBTYPE_TEXT					= "text"
@@ -456,14 +458,16 @@ log( LOG_LEVEL_INFO, CHILD_DEVICE_NODE, MSG_SUBTYPE_CUSTOM + "/settings/UISlider
 
 try:
 	#tempSensor = W1ThermSensor()
-	tempSensor = W1Reader()
+	#tempSensor = W1Reader()
+	tempSensor = AdafruitCCS811Reader()
+	
 except:
 	tempSensor = None
 
-#heatRelayReader = GPIORelayReader(settings)
-heatRelayReader = HIDUSBRelayReader(settings)
-#heatRelaySetter = GPIORelaySetter(settings)
-heatRelaySetter = HIDUSBRelaySetter(settings)
+heatRelayReader = GPIORelayReader(settings)
+#heatRelayReader = HIDUSBRelayReader(settings)
+heatRelaySetter = GPIORelaySetter(settings)
+#heatRelaySetter = HIDUSBRelaySetter(settings)
 
 
 # PIR (Motion Sensor) setup:
@@ -911,6 +915,7 @@ def check_sensor_temp( dt ):
 		dataDict = tempSensor.read()
 		rawTemp = dataDict['temp']
 		rawHumi = dataDict['humi']
+		rawCO2 = dataDict['co2']
 
 
 		correctedTemp = ( ( ( rawTemp - freezingMeasured ) * referenceRange ) / measuredRange ) + freezingPoint
@@ -921,7 +926,8 @@ def check_sensor_temp( dt ):
 
 #		if abs( priorCorrected - correctedTemp ) >= TEMP_TOLERANCE:
 		log( LOG_LEVEL_STATE, CHILD_DEVICE_TEMP, MSG_SUBTYPE_TEMPERATURE, str( currentTemp ) )	
-		log( LOG_LEVEL_STATE, CHILD_DEVICE_TEMP, MSG_SUBTYPE_TEMPERATURE1, str( currentTemp ) )	
+		log( LOG_LEVEL_STATE, CHILD_DEVICE_TEMP, MSG_SUBTYPE_TEMPERATURE1, str( currentTemp ) )
+		log( LOG_LEVEL_STATE, CHILD_DEVICE_TEMP, MSG_SUBTYPE_CO2, str( rawCO2 ) )		
 #			priorCorrected = correctedTemp	
 
 		currentLabel.text = "[b]" + str( currentTemp ) + scaleUnits + "[/b]"
@@ -1393,6 +1399,16 @@ class WebInterface( object ):
 		rrdfile = os.path.join("/var/run/mqtt2rrd/mymqtt/sensor/log/state/thermostat/temperatureSensor/set/", "temperature1.rrd")
 		cherrypy.response.headers['Content-Type'] = 'image/png'
 		command = ('rrdtool', 'graph', '-', "--imgformat", "PNG", "DEF:mymqtt_sensor_log_s="+rrdfile+":mymqtt_sensor_log_s:AVERAGE", "LINE:mymqtt_sensor_log_s#FF0000:Temperature (Celsius)")
+		if time is not None:
+			command += ('--start', 'end-'+time)
+
+		return Popen(command, stdout=PIPE).communicate()[0]
+		
+	@cherrypy.expose
+	def co2_png(self, time=None):
+		rrdfile = os.path.join("/var/run/mqtt2rrd/mymqtt/sensor/log/state/thermostat/temperatureSensor/set/", "co2.rrd")
+		cherrypy.response.headers['Content-Type'] = 'image/png'
+		command = ('rrdtool', 'graph', '-', "--imgformat", "PNG", "DEF:mymqtt_sensor_log_s="+rrdfile+":mymqtt_sensor_log_s:AVERAGE", "LINE:mymqtt_sensor_log_s#FF0000:CO2 (PPM)")
 		if time is not None:
 			command += ('--start', 'end-'+time)
 
